@@ -22,6 +22,7 @@ import binascii
 import time
 from threading import Thread
 from signal import signal, alarm, SIGALRM
+import tracemalloc
 
 import jsonschema
 from insights_messaging.consumers import Consumer as ICMConsumer
@@ -70,6 +71,9 @@ class Consumer(ICMConsumer):
         processing_timeout_s=0,
         **kwargs,
     ):
+
+        tracemalloc.start()
+
         # pylint: disable=too-many-arguments
         """Construct a new external data pipeline Kafka consumer."""
         bootstrap_servers = kwargs.get("bootstrap_servers", None)
@@ -117,6 +121,9 @@ class Consumer(ICMConsumer):
 
             self.dlq_producer = KafkaProducer(**dlq_producer_config)
 
+        self.tracemalloc_producer = KafkaProducer(bootstrap_servers="host.docker.internal:9092")
+        self.tracemalloc_topic = "tracemalloc"
+
     def _consume(self, msg):
         try:
             alarm(self.processing_timeout)
@@ -137,8 +144,18 @@ class Consumer(ICMConsumer):
     def run(self):
         """Execute the consumer logic."""
         signal(SIGALRM, handle_message_processing_timeout)
+        i = 0
         for msg in self.consumer:
             self._consume(msg)
+            i = i + 1
+            if i % 10 == 0:
+                snapshot = tracemalloc.take_snapshot()
+                stats = {
+                    "origin": "consumer.run",
+                    "msg": i,
+                    "stats": snapshot.statistics('lineno')[:10]
+                }
+                self.tracemalloc_producer.send(self.tracemalloc_topic, str(stats).encode("utf-8"))
 
 
     def process_dead_letter(self, msg):
@@ -391,7 +408,17 @@ class AnemicConsumer(Consumer):
     def run(self):
         """Execute the consumer logic."""
         signal(SIGALRM, handle_message_processing_timeout)
+        i = 0
         for msg in self.consumer:
+            i = i + 1
+            if i % 10 == 0:
+                snapshot = tracemalloc.take_snapshot()
+                stats = {
+                    "origin": "anemicconsumer.run",
+                    "msg": i,
+                    "stats": snapshot.statistics('lineno')[:10]
+                }
+                self.tracemalloc_producer.send(self.tracemalloc_topic, str(stats).encode("utf-8"))
             headers = dict(msg.headers)
             if not headers:
                 LOG.debug(AnemicConsumer.NO_HEADER_DEBUG_MESSAGE)

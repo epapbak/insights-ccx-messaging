@@ -74,7 +74,7 @@ class HTTPDownloader:
         r"X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=[^/]+$"
     )
 
-    def __init__(self, max_archive_size=None, allow_unsafe_links=False):
+    def __init__(self, max_archive_size=None, allow_unsafe_links=True):
         """`HTTPDownloader` initializer.
 
         This method accepts a `max_archive_size` argument, that indicates the
