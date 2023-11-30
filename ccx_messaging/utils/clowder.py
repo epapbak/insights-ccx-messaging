@@ -23,25 +23,24 @@ from app_common_python.types import BrokerConfigAuthtypeEnum
 logger = logging.getLogger(__name__)
 
 
-def apply_clowder_config(manifest):
-    """Apply Clowder config values to ICM config manifest."""
-    Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-    config = yaml.load(manifest, Loader=Loader)
+def get_clowder_bootstrap_servers(clowder_broker_list):
+    """Get list of bootstrap servers from loaded Clowder broker config."""
+    broker_addresses = []
+    for broker in clowder_broker_list:
+        if broker.Port:
+            broker_addresses.append(f"{broker.Hostname}:{broker.Port}")
+        else:
+            broker_addresses.append(broker.Hostname)
+    return broker_addresses
 
-    # Find the Payload Tracker watcher, as it might be affected by config changes
-    pt_watcher_name = "ccx_messaging.watchers.payload_tracker_watcher.PayloadTrackerWatcher"
-    pt_watcher = None
-    for watcher in config["service"]["watchers"]:
-        if watcher["name"] == pt_watcher_name:
-            pt_watcher = watcher
-            break
+
+def get_clowder_broker_config(clowder_broker_list):
+    """Get application's broker config from loaded Clowder broker config."""
+    bootstrap_servers = "".join(get_clowder_bootstrap_servers(clowder_broker_list), ",")
+    logger.debug("Kafka bootstrap server URLs: %s", bootstrap_servers)
+    kafka_broker_config = {"bootstrap.servers": bootstrap_servers}
 
     clowder_broker_config = app_common_python.LoadedConfig.kafka.brokers[0]
-    kafka_url = f"{clowder_broker_config.hostname}:{clowder_broker_config.port}"
-    logger.debug("Kafka URL: %s", kafka_url)
-
-    kafka_broker_config = {"bootstrap.servers": kafka_url}
-
     if clowder_broker_config.cacert:
         # Current Kafka library is not able to handle the CA file, only a path to it
         # FIXME: Duplicating parameters in order to be used by both Kafka libraries
@@ -58,13 +57,30 @@ def apply_clowder_config(manifest):
             }
         )
 
-    config["service"]["consumer"]["kwargs"]["kafka_broker_config"] = kafka_broker_config
-    config["service"]["publisher"]["kwargs"]["kafka_broker_config"] = kafka_broker_config
+    return kafka_broker_config
 
-    if pt_watcher:
-        pt_watcher["kwargs"]["kafka_broker_config"] = kafka_broker_config
 
-    logger.info("Kafka configuration updated from Clowder configuration")
+def apply_clowder_config(manifest):
+    """Apply Clowder config values to ICM config manifest."""
+    Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    config = yaml.load(manifest, Loader=Loader)
+
+    # Find the Payload Tracker watcher, as it might be affected by config changes
+    pt_watcher_name = "ccx_messaging.watchers.payload_tracker_watcher.PayloadTrackerWatcher"
+    pt_watcher = None
+    for watcher in config["service"]["watchers"]:
+        if watcher["name"] == pt_watcher_name:
+            pt_watcher = watcher
+            break
+
+    brokers = app_common_python.LoadedConfig.kafka.brokers
+    if len(brokers) > 0:
+        kafka_broker_config = get_clowder_broker_config(brokers)
+        config["service"]["consumer"]["kwargs"]["kafka_broker_config"] = kafka_broker_config
+        config["service"]["publisher"]["kwargs"]["kafka_broker_config"] = kafka_broker_config
+        if pt_watcher:
+            pt_watcher["kwargs"]["kafka_broker_config"] = kafka_broker_config
+        logger.info("Kafka brokers configuration updated from Clowder configuration")
 
     consumer_topic = config["service"]["consumer"]["kwargs"].get("incoming_topic")
     dlq_topic = config["service"]["consumer"]["kwargs"].get("dead_letter_queue_topic")
