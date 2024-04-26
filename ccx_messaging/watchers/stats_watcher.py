@@ -21,6 +21,7 @@ import time
 from prometheus_client import Counter, Histogram, start_http_server, REGISTRY
 
 from ccx_messaging.watchers.consumer_watcher import ConsumerWatcher
+from insights_messaging.watchers import EngineWatcher
 
 
 LOG = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ ARCHIVE_TYPE_VALUES = ["ocp", "hypershift", "ols"]
 
 
 # pylint: disable=too-many-instance-attributes
-class StatsWatcher(ConsumerWatcher):
+class StatsWatcher(EngineWatcher, ConsumerWatcher):
     """A Watcher that stores different Prometheus `Counter`s."""
 
     def __init__(self, prometheus_port=8000):
